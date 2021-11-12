@@ -31,6 +31,7 @@ import matplotlib.pyplot as plt
 
 
 BATCH_SIZE = 16
+DATASET_TO_USE = "UNION"
 
 
 # In[4]:
@@ -43,11 +44,6 @@ data.columns = data.iloc[0]
 data = data[1:]
 data['full'] = data['sentence1']+ " " + data['sentence2']+ " " + data['sentence3']+ " " + data['sentence4']+ " " + data['sentence5']
 data['input'] = data['sentence1']+ " " + data['sentence2']+ " " + data['sentence3']+ " " + data['sentence4']
-data
-
-
-# In[5]:
-
 
 val_data = pd.read_csv('../Dataset/XWjas1', sep=",", header=None)
 val_data.columns = val_data.iloc[0]
@@ -57,7 +53,45 @@ val_data = val_data[1:]
 val_data['InputSentence5']  = np.where(val_data['AnswerRightEnding']== '1', val_data['RandomFifthSentenceQuiz1'], val_data['RandomFifthSentenceQuiz2'])
 val_data['full'] = val_data['InputSentence1']+ " " + val_data['InputSentence2']+ " " + val_data['InputSentence3']+ " " + val_data['InputSentence4']+ " " + val_data['InputSentence5']
 val_data['input'] = val_data['InputSentence1']+ " " + val_data['InputSentence2']+ " " + val_data['InputSentence3']+ " " + val_data['InputSentence4']
-val_data
+
+print('The shapes of data and val_data')
+print(data.shape)
+print(val_data.shape)
+
+
+# In[5]:
+
+
+if(DATASET_TO_USE == 'UNION'):
+    text_file = open('../UNION/train_data/train_human.txt', "r") #Read UNION File
+    lines = text_file.readlines()
+    lines = [item[:-1]for item in lines]
+    text_file.close()
+
+    data = pd.DataFrame(np.reshape(lines,(-1,6))) #Convert to pandas format
+    data = data[[0,1,2,3,4]]
+    data.columns = ['sentence1','sentence2','sentence3','sentence4','sentence5']
+    data['full'] = data['sentence1']+ " " + data['sentence2']+ " " + data['sentence3']+ " " + data['sentence4']+ " " + data['sentence5']
+    data['input'] = data['sentence1']+ " " + data['sentence2']+ " " + data['sentence3']+ " " + data['sentence4']
+    #data
+
+    text_file = open('../UNION/train_data/dev_human.txt', "r") #Read UNION File
+    lines = text_file.readlines()
+    lines = [item[:-1]for item in lines]
+    text_file.close()
+
+    val_data = pd.DataFrame(np.reshape(lines,(-1,6))) #Convert to pandas format
+    val_data = val_data[[0,1,2,3,4]]
+    val_data.columns = ['InputSentence1','InputSentence2','InputSentence3','InputSentence4','InputSentence5']
+    val_data['full'] = val_data['InputSentence1']+ " " + val_data['InputSentence2']+ " " + val_data['InputSentence3']+ " " + val_data['InputSentence4']+ " " + val_data['InputSentence5']
+    val_data['input'] = val_data['InputSentence1']+ " " + val_data['InputSentence2']+ " " + val_data['InputSentence3']+ " " + val_data['InputSentence4']
+    val_data.full
+    
+    print('The shapes of data and val_data')
+    print(data.shape)
+    print(val_data.shape)
+else:
+    print('UNION was not loaded')
 
 
 # In[6]:
@@ -66,15 +100,17 @@ val_data
 with torch.cuda.device('cuda:1'):
     torch.cuda.empty_cache()
 
-all_sentences = [x for x in data.full]#[:1000]]
+all_sentences = [x for x in data.full]
 
-val_sentences = [x for x in val_data.input]#[:1000]]
+val_sentences = [x for x in val_data.input]
 
 
 # In[7]:
 
 
 all_sentences[0:10]
+print('train_len ', len(all_sentences))
+print('val_len ', len(val_sentences))
 
 
 # In[8]:
@@ -166,6 +202,7 @@ validation_dataloader = DataLoader(val_set, sampler = SequentialSampler(val_set)
 
 # Create default config
 configuration = GPT2Config.from_pretrained('gpt2', output_hidden_states=False)
+
 # Load pretrained gpt2
 model = GPT2LMHeadModel.from_pretrained("gpt2", config=configuration)
 model.resize_token_embeddings(len(tokenizer))
@@ -174,7 +211,7 @@ model.resize_token_embeddings(len(tokenizer))
 device = torch.device("cuda:1")
 model.to(device)
 
-optimizer = torch.optim.Adam(model.parameters(),lr = 0.00005)
+optimizer = torch.optim.Adam(model.parameters(),lr = 5e-7)
 model = model.to(device)
 
 
@@ -182,6 +219,8 @@ model = model.to(device)
 
 
 from tqdm import tqdm
+import re
+
 
 #call model with a batch of input
 def process_one_batch(batch):
@@ -196,7 +235,7 @@ def output_one_batch(batch):
     b_input_ids = batch[0].to(device)
     b_labels = batch[0].to(device)
     b_masks = batch[1].to(device)
-    outputs  = model(b_input_ids,  num_beams=5 ,  attention_mask = b_masks,labels=b_labels)
+    outputs  = model(b_input_ids,  num_beams=2 ,  attention_mask = b_masks,labels=b_labels)
     return outputs
 
 #do one epoch for training
@@ -243,6 +282,147 @@ def eval_epoch():
     return avg_val_loss
     
 
+#Runs the model on a set number of batches and saves the results to a json file
+def save_results( num_batches = 15, iter = 0):
+    indexes_list = []
+    inputs_list = []
+    predicted_list = []
+    expected_list = []
+    
+    model.save_pretrained("saved_model_temp")
+
+    #for i in tqdm(range(num_examples)):
+    for i, batch in enumerate(tqdm(validation_dataloader)):
+        if(num_batches != None and i>num_batches):
+            break
+        # Story is:
+        #input_ids = tokenizer(val_data.input.iloc[i], return_tensors='pt')
+        #input_ids.to(device)
+        b_input_ids = batch[0].to(device)
+        
+        greedy_output = model.generate(
+                b_input_ids,  #check stars   
+                num_beams=2 ,
+                return_dict_in_generate=True, 
+                output_scores=True, 
+                max_length=150,
+                tempterature = 5,
+                top_p = 4
+                )
+        
+        print(greedy_output['sequences'].shape)
+        output = tokenizer.batch_decode(greedy_output['sequences'])
+        len_input = len(val_data.input.iloc[i])
+        #output = tokenizer.decode(greedy_output[0], skip_special_tokens=True)
+        b_outputs = []
+        
+        for b_idx in range(BATCH_SIZE):
+            if(len(output) <= b_idx):
+                break
+            idx = BATCH_SIZE * i + b_idx
+            end_words = val_data.InputSentence4
+            in_words = val_data.input.iloc[idx]
+            
+            indexes_list.append(idx)
+            inputs_list.append(val_data.input.iloc[idx])
+            #predicted_list.append(output[b_idx])
+            if(len(re.split('\? |! |\. ',output[b_idx]))<5):
+                predicted_list.append('bad gen')
+            else:
+                predicted_list.append(re.split('\? |! |\. ',output[b_idx])[4] + '.')
+            expected_list.append(val_data.InputSentence5.iloc[idx])
+            
+    outputs = pd.DataFrame()
+    outputs['inputs'] = inputs_list
+    outputs['predicted'] = predicted_list
+    outputs['expected'] = expected_list
+    
+    print(outputs[:5])
+    
+    data = {}
+    data['ex'] = []
+    for i in range(len(indexes_list)):
+        data['ex'].append({
+            'idx': indexes_list[i],
+            'input': inputs_list[i],
+            'prediction': predicted_list[i],
+            'expected': expected_list[i]
+
+        })
+
+    with open('test_cases/test_cases'+ str(iter)+'.json', 'w') as outfile:
+        json.dump(data, outfile)
+
+
+# In[17]:
+
+
+
+save_results(1)
+
+
+# In[ ]:
+
+
+train_loss = []
+val_loss = []
+for i in range(3):
+    train_loss.append(train_epoch())
+    val_loss.append(eval_epoch())
+    if(i<7):
+        save_results(None, i)
+    else:
+        save_results(None, i)
+    plt.plot(train_loss)
+    plt.plot(val_loss)
+    plt.show()
+    plt.savefig('losses.png')
+
+save_results(None)
+
+
+# In[ ]:
+
+
+save_results(1, 0)
+
+
+# ##### 
+
+# In[ ]:
+
+
+import os
+#os.makedirs("saved_model")
+#model.save_pretrained("saved_model")
+#model = .from_pretrained("path/to/awesome-name-you-picked")
+
+
+# In[ ]:
+
+
+# Create default config
+#configuration = GPT2Config.from_pretrained('gpt2', output_hidden_states=False)
+# Load pretrained gpt2
+#model = GPT2LMHeadModel.from_pretrained("saved_model/", config=configuration)
+
+model = GPT2LMHeadModel.from_pretrained("saved_model/")#, config=configuration)
+
+
+model.resize_token_embeddings(len(tokenizer))
+
+# Create device
+device = torch.device("cuda:1")
+model.to(device)
+
+optimizer = torch.optim.Adam(model.parameters(),lr = 5e-7)
+model = model.to(device)
+
+
+# In[ ]:
+
+
+
 #do one epoch for eval
 def save_results( num_batches = 15, iter = 0):
     indexes_list = []
@@ -261,10 +441,12 @@ def save_results( num_batches = 15, iter = 0):
         
         greedy_output = model.generate(
                 b_input_ids,  #check stars   
-                num_beams=5 ,
+                num_beams=1,
                 return_dict_in_generate=True, 
                 output_scores=True, 
-                max_length=150
+                max_length=150,
+                #tempterature = 5,
+                #top_p = 10
                 )
         
         print(greedy_output['sequences'].shape)
@@ -290,7 +472,11 @@ def save_results( num_batches = 15, iter = 0):
             
             indexes_list.append(idx)
             inputs_list.append(val_data.input.iloc[idx])
-            predicted_list.append(output[b_idx])
+            #predicted_list.append(output[b_idx])
+            if(len(re.split('\? |! |\. ',output[b_idx]))<5):
+                predicted_list.append('bad gen')
+            else:
+                predicted_list.append(re.split('\? |! |\. ',output[b_idx])[4] + '.')
             expected_list.append(val_data.InputSentence5.iloc[idx])
             
     outputs = pd.DataFrame()
@@ -314,40 +500,11 @@ def save_results( num_batches = 15, iter = 0):
 
         })
 
-    with open('test_cases'+ str(iter)+'.json', 'w') as outfile:
+    with open('test_cases/test_cases'+ str(iter)+'.json', 'w') as outfile:
         json.dump(data, outfile)
+        
+save_results(None, 0)
 
-
-# In[17]:
-
-
-save_results(1)
-
-
-# In[18]:
-
-
-train_loss = []
-val_loss = []
-print('initial val loss ', eval_epoch())
-for i in range(15):
-    train_loss.append(train_epoch())
-    val_loss.append(eval_epoch())
-    if(i<7):
-        save_results(None, i)
-    else:
-        save_results(100, i)
-    plt.plot(train_loss)
-    plt.plot(val_loss)
-    plt.show()
-    plt.savefig('losses.png')
-    print(train_loss)
-    print(val_loss)
-
-save_results(None)
-
-
-# ##### 
 
 # In[ ]:
 
