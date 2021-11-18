@@ -4,3 +4,5 @@ bash
 conda env create -f conda/environment.yml
 conda activate roc_env
 conda install jupyterlab
+conda install -c anaconda ipykernel
+python -m ipykernel install --user --name=ROC_env
