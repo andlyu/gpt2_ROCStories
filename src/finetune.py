@@ -25,6 +25,11 @@ from torch.utils.data import random_split
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 import json
 import matplotlib.pyplot as plt
+import os
+
+
+file_path = os.path.abspath(os.path.dirname(__file__))
+print(file_path)
 
 
 # In[3]:
@@ -65,7 +70,7 @@ if(DATASET_TO_USE != 'UNION'):
 
 
 if(DATASET_TO_USE == 'UNION'):
-    text_file = open('../train_data/train_human.txt', "r") #Read UNION File
+    text_file = open(file_path + '/../train_data/train_human.txt', "r") #Read UNION File
     lines = text_file.readlines()
     lines = [item[:-1]for item in lines]
     text_file.close()
@@ -78,7 +83,7 @@ if(DATASET_TO_USE == 'UNION'):
     #data
     
 
-    text_file = open('../train_data/dev_human.txt', "r") #Read UNION File
+    text_file = open(file_path + '/../train_data/dev_human.txt', "r") #Read UNION File
     lines = text_file.readlines()
     lines = [item[:-1]for item in lines]
     text_file.close()
@@ -364,7 +369,7 @@ def save_results( num_batches = 15, iter = 0):
 
         })
 
-    with open('test_cases/test_cases'+ str(iter)+'.json', 'w') as outfile:
+    with open(file_path + '/test_cases/test_cases'+ str(iter)+'.json', 'w') as outfile:
         json.dump(data, outfile)
 
 
